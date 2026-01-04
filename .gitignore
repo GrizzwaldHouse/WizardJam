@@ -1,0 +1,243 @@
+# ==============================================================================
+# Unreal Engine 5 - Git Ignore Configuration
+# ==============================================================================
+# Author: Marcus Daley
+# Date: December 31, 2025
+# Project: WizardJam (Wizard Arena Combat Game)
+# Purpose: Prevents large binary files, generated content, and IDE artifacts
+#          from being committed to Git. This dramatically reduces repository
+#          size and prevents the "file too large" errors on GitHub push.
+#
+# Usage: Place this file in your project root (same folder as .uproject file)
+#        Then run: git add .gitignore
+#                  git commit -m "Add gitignore for UE5 project"
+#
+# Reference: Based on Unreal Engine template from gitignore.io and 
+#            Epic Games recommended patterns
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# BINARIES AND BUILD OUTPUT
+# ------------------------------------------------------------------------------
+# These folders contain compiled code and are regenerated every build
+# They can be MASSIVE (10-50+ GB) and should NEVER be in source control
+
+Binaries/
+DerivedDataCache/
+Intermediate/
+
+# Build artifacts from packaging
+Build/
+
+# ------------------------------------------------------------------------------
+# SAVED DATA AND CACHE
+# ------------------------------------------------------------------------------
+# Editor autosaves, crash reports, logs, and temporary data
+# These change constantly and would create enormous commit histories
+
+Saved/
+
+# Specifically exclude these common large folders within Saved
+Saved/Autosaves/
+Saved/Backup/
+Saved/Config/CrashReportClient/
+Saved/Crashes/
+Saved/Logs/
+Saved/StagedBuilds/
+
+# ------------------------------------------------------------------------------
+# VISUAL STUDIO / RIDER IDE FILES
+# ------------------------------------------------------------------------------
+# These are generated when you open the project in your IDE
+# Each developer's machine generates its own - no need to share
+
+.vs/
+.vsconfig
+*.sln
+*.suo
+*.sdf
+*.opensdf
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+
+# Visual Studio Code
+.vscode/
+
+# JetBrains Rider
+.idea/
+*.DotSettings.user
+
+# ------------------------------------------------------------------------------
+# DERIVED DATA AND CACHE
+# ------------------------------------------------------------------------------
+# These are generated from your source assets - regenerated automatically
+# Can be HUGE (many gigabytes) for large projects
+
+DerivedDataCache/
+DDC/
+
+# Local shader cache - regenerates based on GPU
+ShaderCache/
+
+# Asset registry cache
+AssetRegistryCache/
+
+# ------------------------------------------------------------------------------
+# PLUGINS - INTERMEDIATE DATA
+# ------------------------------------------------------------------------------
+# Plugin intermediate files (each plugin has its own build artifacts)
+# This pattern catches nested Intermediate folders in plugins
+
+**/Intermediate/
+**/Binaries/
+
+# ------------------------------------------------------------------------------
+# OPERATING SYSTEM FILES
+# ------------------------------------------------------------------------------
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.directory
+
+# ------------------------------------------------------------------------------
+# UNREAL SPECIFIC PATTERNS
+# ------------------------------------------------------------------------------
+# Unreal project descriptor backup files
+*.uproject.backup
+
+# Hot reload manifests
+*.hotreload
+
+# Asset metadata cache
+*.uasset.bak
+*.umap.bak
+
+# Temp files from cooking
+*.utxt
+
+# Live coding session files
+*.live++.db
+
+# ------------------------------------------------------------------------------
+# SOURCE CONTROL METADATA
+# ------------------------------------------------------------------------------
+# Perforce workspace files (if you ever migrate)
+*.p4config
+
+# Plastic SCM
+.plastic/
+
+# ------------------------------------------------------------------------------
+# BUILD CONFIGURATION FILES (Optional)
+# ------------------------------------------------------------------------------
+# UNCOMMENT these if you want to keep build configs out of source control
+# Most teams INCLUDE these, but uncomment if your builds are identical
+
+# BuildConfiguration.xml
+# DefaultEngine.ini
+# DefaultGame.ini
+
+# ------------------------------------------------------------------------------
+# CONTENT EXCLUSIONS (Optional - Use Sparingly)
+# ------------------------------------------------------------------------------
+# Large media files you might not want in Git
+# UNCOMMENT if you're using Git LFS or external asset hosting
+
+# Content/**/*.uasset
+# Content/**/*.umap
+# *.fbx
+# *.wav
+# *.mp3
+# *.mp4
+
+# ------------------------------------------------------------------------------
+# ENGINE INSTALLATION (If accidentally in project folder)
+# ------------------------------------------------------------------------------
+# Sometimes people accidentally put engine files in project - exclude them
+Engine/
+
+# ------------------------------------------------------------------------------
+# STARTER CONTENT (Optional)
+# ------------------------------------------------------------------------------
+# Unreal's starter content can be huge - uncomment if not using it
+# Content/StarterContent/
+
+# ------------------------------------------------------------------------------
+# DOCUMENTATION BUILDS
+# ------------------------------------------------------------------------------
+# If you generate docs from code
+Documentation/html/
+Documentation/latex/
+
+# ------------------------------------------------------------------------------
+# PYTHON CACHE (For MCP Scripts)
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# ------------------------------------------------------------------------------
+# NODE MODULES (If using web tools)
+# ------------------------------------------------------------------------------
+node_modules/
+
+# ------------------------------------------------------------------------------
+# LOGS AND DEBUG
+# ------------------------------------------------------------------------------
+*.log
+*.log.*
+debug/
+logs/
+
+# ==============================================================================
+# END OF GITIGNORE
+# ==============================================================================
+# WHAT THIS SAVES:
+# - Repository size: From 10-50 GB to typically 500 MB - 2 GB
+# - Push time: From hours/failures to seconds
+# - Clone time: From hours to minutes
+#
+# WHAT YOU KEEP IN GIT:
+# - Source/ folder (your C++ code)
+# - Content/ folder (your assets - consider Git LFS for large projects)
+# - Config/ folder (project settings)
+# - *.uproject file (project descriptor)
+# - Plugins/ source code (not their Binaries/Intermediate)
+# ==============================================================================
