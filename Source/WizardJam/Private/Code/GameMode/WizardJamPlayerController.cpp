@@ -14,7 +14,7 @@
 // ============================================================================
 
 #include "Code/GameMode/WizardJamPlayerController.h"
-#include "Code/Utility/WizardJamHUDWidget.h"
+#include "Code/UI/WizardJamHUDWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"

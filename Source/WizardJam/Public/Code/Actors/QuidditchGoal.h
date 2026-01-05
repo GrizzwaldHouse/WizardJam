@@ -1,19 +1,8 @@
-// QuidditchGoal.h
-// Author: Marcus Daley
-// Date: January 1, 2026
-// Purpose: Elemental goal post that awards points when hit by matching spell projectile
-// 
-// Designer Usage:
-//   1. Place BP_QuidditchGoal_Flame/Ice/Lightning/Arcane in level
-//   2. Set GoalElement to match desired spell type
-//   3. Set TeamID: 0 = Player goals (AI attacks these), 1 = AI goals (Player attacks these)
-//   4. Configure PointsForCorrectElement (default 10)
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Utility/SpellChannelTypes.h"
+#include "Code/Utility/SpellChannelTypes.h"
 #include "GenericTeamAgentInterface.h"
 #include "QuidditchGoal.generated.h"
 

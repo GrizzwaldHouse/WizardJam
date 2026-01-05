@@ -1,16 +1,22 @@
 // QuidditchGoal.cpp
 // Author: Marcus Daley
-// Date: January 1, 2026
+// Date: January 4, 2026
 // Implementation of elemental goal post scoring system
+//
+// Key Implementation Details:
+//   - Uses BaseProjectile::GetSpellElement() accessor (not direct property access)
+//   - Creates dynamic material instances for color feedback
+//   - Broadcasts scoring events via delegate (Observer pattern)
+//   - Collision uses ECC_GameTraceChannel1 (must match projectile channel)
 
-#include "Actor/QuidditchGoal.h"
+#include "Code/Actors/QuidditchGoal.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "BaseProjectile.h"
+#include "Code/Actors/BaseProjectile.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TimerManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogQuidditchGoal, Log, All);
+DEFINE_LOG_CATEGORY(LogQuidditchGoal);
 
 AQuidditchGoal::AQuidditchGoal()
     : GoalElement(NAME_None)
@@ -24,24 +30,34 @@ AQuidditchGoal::AQuidditchGoal()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    // Create root scene component
+    // Create root scene component for proper transform hierarchy
     USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
     SetRootComponent(Root);
 
-    // Create goal mesh
-    // Designer will set mesh in Blueprint to hoop/ring/target model
+    // Create goal mesh component
+    // Designer assigns actual mesh in Blueprint (hoop, ring, target, etc.)
     GoalMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GoalMesh"));
-    GoalMesh->SetupAttachment(RootComponent);
-    GoalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if (GoalMesh)
+    {
+        GoalMesh->SetupAttachment(RootComponent);
+        GoalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
 
     // Create scoring zone (overlap box in front of goal)
+    // Projectiles must overlap this zone to score
     ScoringZone = CreateDefaultSubobject<UBoxComponent>(TEXT("ScoringZone"));
-    ScoringZone->SetupAttachment(GoalMesh);
-    ScoringZone->SetBoxExtent(FVector(100.0f, 100.0f, 100.0f));
-    ScoringZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    ScoringZone->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-    ScoringZone->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-    ScoringZone->SetCollisionResponseToChannel(ECollisionChannel::ECC_GameTraceChannel1, ECollisionResponse::ECR_Overlap);
+    if (ScoringZone)
+    {
+        ScoringZone->SetupAttachment(GoalMesh);
+        ScoringZone->SetBoxExtent(FVector(100.0f, 100.0f, 100.0f));
+        ScoringZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        ScoringZone->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+        ScoringZone->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+        // Respond to WorldDynamic objects (projectiles use "OverlapAllDynamic" profile)
+        ScoringZone->SetCollisionResponseToChannel(ECollisionChannel::ECC_WorldDynamic, ECollisionResponse::ECR_Overlap);
+        // Also respond to pawns in case we want character-based scoring later
+        ScoringZone->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+    }
 
     UE_LOG(LogQuidditchGoal, Log, TEXT("[QuidditchGoal] Constructor initialized"));
 }
@@ -50,11 +66,11 @@ void AQuidditchGoal::PostInitializeComponents()
 {
     Super::PostInitializeComponents();
 
-    // Bind overlap event
+    // Bind overlap event (must happen after components are initialized)
     if (ScoringZone)
     {
         ScoringZone->OnComponentBeginOverlap.AddDynamic(this, &AQuidditchGoal::OnScoringZoneBeginOverlap);
-        UE_LOG(LogQuidditchGoal, Log, TEXT("[%s] Scoring zone overlap bound"), *GetName());
+        UE_LOG(LogQuidditchGoal, Log, TEXT("[%s] Scoring zone overlap delegate bound"), *GetName());
     }
 }
 
@@ -62,10 +78,10 @@ void AQuidditchGoal::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Set team ID
+    // Sync TeamId with TeamID property for IGenericTeamAgentInterface
     TeamId = FGenericTeamId(TeamID);
 
-    // Apply element color to goal
+    // Apply element color to goal mesh material
     ApplyElementColor();
 
     UE_LOG(LogQuidditchGoal, Display, TEXT("[%s] Goal ready | Element: '%s' | Team: %d | Points: %d"),
@@ -80,46 +96,51 @@ void AQuidditchGoal::OnScoringZoneBeginOverlap(
     bool bFromSweep,
     const FHitResult& SweepResult)
 {
-    // Only process projectiles
+    // Only process BaseProjectile actors
     ABaseProjectile* Projectile = Cast<ABaseProjectile>(OtherActor);
     if (!Projectile)
     {
         return;
     }
 
-    // Get projectile owner (who shot it)
+    // Get projectile owner (who fired it) for scoring attribution
     AActor* Shooter = Projectile->GetOwner();
     if (!Shooter)
     {
-        UE_LOG(LogQuidditchGoal, Warning, TEXT("[%s] Projectile has no owner - cannot award points"), *GetName());
+        UE_LOG(LogQuidditchGoal, Warning, TEXT("[%s] Projectile '%s' has no owner - cannot award points"),
+            *GetName(), *Projectile->GetName());
         return;
     }
 
-    // Check if element matches
+    // Check if projectile element matches goal element
     bool bCorrectElement = IsCorrectElement(Projectile);
 
-    // Calculate points
+    // Calculate points (0 if wrong element)
     int32 Points = CalculatePoints(Shooter, bCorrectElement);
 
-    // Broadcast scoring event to GameMode
-    OnGoalScored.Broadcast(Shooter, Projectile->SpellType, Points, bCorrectElement);
+    // Get spell element name for logging and delegate
+    // Using accessor method instead of direct property access
+    FName ProjectileElement = Projectile->GetSpellElement();
+
+    // Broadcast scoring event to GameMode (Observer pattern)
+    OnGoalScored.Broadcast(Shooter, ProjectileElement, Points, bCorrectElement);
 
     // Play visual feedback
     PlayHitFeedback(bCorrectElement);
 
-    // Log scoring
+    // Log scoring result
     if (bCorrectElement)
     {
-        UE_LOG(LogQuidditchGoal, Display, TEXT("[%s] GOAL! '%s' scored %d points with '%s'"),
-            *GetName(), *Shooter->GetName(), Points, *Projectile->SpellType.ToString());
+        UE_LOG(LogQuidditchGoal, Display, TEXT("[%s] === GOAL! === '%s' scored %d points with '%s'"),
+            *GetName(), *Shooter->GetName(), Points, *ProjectileElement.ToString());
     }
     else
     {
         UE_LOG(LogQuidditchGoal, Display, TEXT("[%s] Wrong element! '%s' used '%s' (need '%s') - 0 points"),
-            *GetName(), *Shooter->GetName(), *Projectile->SpellType.ToString(), *GoalElement.ToString());
+            *GetName(), *Shooter->GetName(), *ProjectileElement.ToString(), *GoalElement.ToString());
     }
 
-    // Destroy projectile after scoring
+    // Destroy projectile after scoring attempt
     Projectile->Destroy();
 }
 
@@ -130,8 +151,12 @@ bool AQuidditchGoal::IsCorrectElement(ABaseProjectile* Projectile) const
         return false;
     }
 
-    // Match spell type to goal element
-    return Projectile->SpellType == GoalElement;
+    // Use accessor method to get projectile element
+    // BaseProjectile::GetSpellElement() returns FName
+    FName ProjectileElement = Projectile->GetSpellElement();
+
+    // Match projectile element to goal element
+    return ProjectileElement == GoalElement;
 }
 
 int32 AQuidditchGoal::CalculatePoints(AActor* ScoringActor, bool bCorrectElement) const
@@ -141,10 +166,10 @@ int32 AQuidditchGoal::CalculatePoints(AActor* ScoringActor, bool bCorrectElement
         return 0;
     }
 
-    // Base points for correct element
+    // Base points for correct element match
     int32 Points = PointsForCorrectElement;
 
-    // Future expansion: Check if ScoringActor is in matching boost zone
+    // Future expansion: Check if ScoringActor is in matching ElementalBoostZone
     // If so, multiply points by BonusPointsMultiplier
     // For now, just return base points
 
@@ -158,17 +183,20 @@ void AQuidditchGoal::ApplyElementColor()
         return;
     }
 
-    // Get color for element
+    // Get color for this goal's element
     CurrentColor = GetColorForElement(GoalElement);
 
-    // Create dynamic material instance if needed
+    // Create dynamic material instance for runtime color changes
     if (GoalMesh->GetNumMaterials() > 0)
     {
         DynamicMaterial = GoalMesh->CreateDynamicMaterialInstance(0);
         if (DynamicMaterial)
         {
+            // Set base and emissive colors
+            // Material must have these parameter names for this to work
             DynamicMaterial->SetVectorParameterValue(FName("BaseColor"), CurrentColor);
             DynamicMaterial->SetVectorParameterValue(FName("EmissiveColor"), CurrentColor * 2.0f);
+
             UE_LOG(LogQuidditchGoal, Log, TEXT("[%s] Applied color (R=%.2f G=%.2f B=%.2f) to material"),
                 *GetName(), CurrentColor.R, CurrentColor.G, CurrentColor.B);
         }
@@ -182,11 +210,11 @@ void AQuidditchGoal::PlayHitFeedback(bool bCorrectElement)
         return;
     }
 
-    // Flash bright color on correct hit, dark on wrong hit
+    // Flash bright on correct hit, dark on wrong hit
     FLinearColor FlashColor = bCorrectElement ? (CurrentColor * 5.0f) : FLinearColor::Black;
     DynamicMaterial->SetVectorParameterValue(FName("EmissiveColor"), FlashColor);
 
-    // Reset color after duration
+    // Reset color after HitFlashDuration
     FTimerDelegate TimerDelegate;
     TimerDelegate.BindLambda([this]()
         {
@@ -201,27 +229,34 @@ void AQuidditchGoal::PlayHitFeedback(bool bCorrectElement)
 
 FLinearColor AQuidditchGoal::GetColorForElement(FName Element) const
 {
-    // Match colors from SpellCollectible system
+    // Colors match SpellCollectible system for visual consistency
+    // Using FName comparison for designer-expandable elements
+
     if (Element == FName("Flame"))
     {
-        return FLinearColor(0.93f, 0.11f, 0.09f, 1.0f);
+        return FLinearColor(0.93f, 0.11f, 0.09f, 1.0f); // Red-orange
     }
     else if (Element == FName("Ice"))
     {
-        return FLinearColor(0.0f, 0.8f, 1.0f, 1.0f);
+        return FLinearColor(0.0f, 0.8f, 1.0f, 1.0f); // Cyan-blue
     }
     else if (Element == FName("Lightning"))
     {
-        return FLinearColor(1.0f, 0.98f, 0.11f, 1.0f);
+        return FLinearColor(1.0f, 0.98f, 0.11f, 1.0f); // Yellow
     }
     else if (Element == FName("Arcane"))
     {
-        return FLinearColor(0.6f, 0.0f, 1.0f, 1.0f);
+        return FLinearColor(0.6f, 0.0f, 1.0f, 1.0f); // Purple
     }
 
     // Default white for unknown elements
     return FLinearColor::White;
 }
+
+// ============================================================================
+// IGenericTeamAgentInterface Implementation
+// Allows AI to identify enemy goals using UE5 team system
+// ============================================================================
 
 FGenericTeamId AQuidditchGoal::GetGenericTeamId() const
 {

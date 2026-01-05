@@ -1,25 +1,24 @@
 // ============================================================================
 // WizardJamGameMode.cpp
 // Developer: Marcus Daley
-// Date: December 25, 2025
+// Date: January 4, 2026
 // ============================================================================
 // Purpose:
-// Implementation of WizardJam game mode with STATIC delegate broadcasting.
+// Implementation of WizardJam game mode with spell collection and Quidditch
+// goal scoring using Observer pattern with STATIC and instance delegates.
 //
 // Key Implementation Details:
-// - BeginPlay binds to SpellCollectible and Component static delegates
+// - BeginPlay binds to SpellCollectible, Component, and QuidditchGoal delegates
 // - ProcessNewSpell broadcasts on BOTH static and instance delegates
-// - Static delegate allows HUD to bind without GameMode reference
-// - Instance delegate allows Blueprint binding
+// - QuidditchGoal scoring tracks player vs AI scores
+// - Match ends when either team reaches WinningScore or time expires
 //
-// Static Delegate Definition:
-// The static delegate must be DEFINED in the .cpp file (not just declared).
-// This creates the actual storage for the delegate's invocation list.
+// Observer Pattern Flow:
+// Spell Collection:
+//   SpellCollectible -> GameMode -> OnSpellCollectedGlobal -> HUD
 //
-// Broadcast Order:
-// 1. OnSpellCollectedGlobal.Broadcast() - C++ listeners (HUD)
-// 2. OnSpellTypeCollected.Broadcast() - Blueprint listeners
-// 3. OnAnySpellEvent.Broadcast() - VFX/SFX listeners (including duplicates)
+// Quidditch Scoring:
+//   QuidditchGoal -> GameMode -> OnPlayerScored/OnAIScored -> HUD
 // ============================================================================
 
 #include "Code/GameMode/WizardJamGameMode.h"
@@ -28,6 +27,8 @@
 #include "Code/Actors/QuidditchGoal.h"
 #include "GenericTeamAgentInterface.h"
 #include "EngineUtils.h"
+#include "TimerManager.h"
+
 DEFINE_LOG_CATEGORY(LogWizardJamGameMode);
 
 // ============================================================================
@@ -42,11 +43,14 @@ FOnSpellCollectedGlobal AWizardJamGameMode::OnSpellCollectedGlobal;
 // CONSTRUCTOR
 // ============================================================================
 
-AWizardJamGameMode::AWizardJamGameMode(): PlayerScore(0)
-, AIScore(0)
-, WinningScore(50)
-, MatchTimeLimit(0.0f)
+AWizardJamGameMode::AWizardJamGameMode()
+    : WinningScore(50)
+    , MatchTimeLimit(0.0f)
+    , PlayerScore(0)
+    , AIScore(0)
 {
+    // Constructor initialization list sets all values
+    // No hardcoded values in function body per Nick Penney standards
 }
 
 // ============================================================================
@@ -59,43 +63,41 @@ void AWizardJamGameMode::BeginPlay()
 
     // ========================================================================
     // BIND TO SPELL SYSTEM STATIC DELEGATES
-    // GameMode is a LISTENER here - it receives events from spell system
     // ========================================================================
 
-    // Bind to SpellCollectible's static delegate
-    // Fires when any SpellCollectible in the world is picked up
     ASpellCollectible::OnAnySpellPickedUp.AddUObject(
         this, &AWizardJamGameMode::HandleSpellCollectiblePickedUp);
 
     UE_LOG(LogWizardJamGameMode, Display,
         TEXT("[GameMode] Bound to ASpellCollectible::OnAnySpellPickedUp"));
 
-    // Bind to SpellCollectionComponent's static delegate
-    // Fires when any component adds a spell (even without collectible)
     UAC_SpellCollectionComponent::OnAnySpellCollected.AddUObject(
         this, &AWizardJamGameMode::HandleComponentSpellCollected);
 
     UE_LOG(LogWizardJamGameMode, Display,
         TEXT("[GameMode] Bound to UAC_SpellCollectionComponent::OnAnySpellCollected"));
 
-    UE_LOG(LogWizardJamGameMode, Display,
-        TEXT("=== WizardJamGameMode Initialized ==="));
-    UE_LOG(LogWizardJamGameMode, Display,
-        TEXT("Broadcasting spell events on AWizardJamGameMode::OnSpellCollectedGlobal"));
+    // ========================================================================
+    // BIND TO QUIDDITCH GOALS
+    // Find all goals in level and bind to their scoring delegates
+    // ========================================================================
 
-    // Bind to all Quidditch goals in level
     for (TActorIterator<AQuidditchGoal> It(GetWorld()); It; ++It)
     {
         AQuidditchGoal* Goal = *It;
         if (Goal)
         {
             Goal->OnGoalScored.AddDynamic(this, &AWizardJamGameMode::OnGoalScored);
-            UE_LOG(LogWizardJamGameMode, Display, TEXT("[GameMode] Bound to goal: %s (Element: %s, Team: %d)"),
+            UE_LOG(LogWizardJamGameMode, Display,
+                TEXT("[GameMode] Bound to goal: %s (Element: %s, Team: %d)"),
                 *Goal->GetName(), *Goal->GoalElement.ToString(), Goal->TeamID);
         }
     }
 
-    // Start match timer if time limit is set
+    // ========================================================================
+    // START MATCH TIMER (if time limit set)
+    // ========================================================================
+
     if (MatchTimeLimit > 0.0f)
     {
         GetWorldTimerManager().SetTimer(
@@ -105,26 +107,31 @@ void AWizardJamGameMode::BeginPlay()
             MatchTimeLimit,
             false
         );
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("[GameMode] Match timer started: %.0f seconds"), MatchTimeLimit);
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("[GameMode] Match timer started: %.0f seconds"), MatchTimeLimit);
     }
 
-    UE_LOG(LogWizardJamGameMode, Display, TEXT("=== QUIDDITCH MATCH STARTED ==="));
-    UE_LOG(LogWizardJamGameMode, Display, TEXT("Winning Score: %d | Time Limit: %.0f"), WinningScore, MatchTimeLimit);
+    UE_LOG(LogWizardJamGameMode, Display,
+        TEXT("=== WIZARDJAM MATCH STARTED ==="));
+    UE_LOG(LogWizardJamGameMode, Display,
+        TEXT("Winning Score: %d | Time Limit: %.0f"), WinningScore, MatchTimeLimit);
 }
 
 void AWizardJamGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     // ========================================================================
     // DELEGATE CLEANUP
-    // Static delegates MUST be unbound in EndPlay or we get crashes.
-    // RemoveAll removes all bindings for this object from the delegate.
+    // Static delegates MUST be unbound in EndPlay or we get crashes
     // ========================================================================
 
     ASpellCollectible::OnAnySpellPickedUp.RemoveAll(this);
     UAC_SpellCollectionComponent::OnAnySpellCollected.RemoveAll(this);
 
+    // Clear match timer
+    GetWorldTimerManager().ClearTimer(MatchTimerHandle);
+
     UE_LOG(LogWizardJamGameMode, Display,
-        TEXT("[GameMode] Unbound from spell system static delegates"));
+        TEXT("[GameMode] Unbound from all delegates"));
 
     Super::EndPlay(EndPlayReason);
 }
@@ -168,7 +175,7 @@ bool AWizardJamGameMode::HasAnySpell(const TArray<FName>& CheckSpells) const
 }
 
 // ============================================================================
-// DELEGATE HANDLERS
+// SPELL DELEGATE HANDLERS
 // ============================================================================
 
 void AWizardJamGameMode::HandleSpellCollectiblePickedUp(
@@ -176,11 +183,6 @@ void AWizardJamGameMode::HandleSpellCollectiblePickedUp(
     AActor* CollectingActor,
     ASpellCollectible* Collectible)
 {
-    // ========================================================================
-    // Handler for SpellCollectible static delegate
-    // This is called when ANY SpellCollectible in the world is picked up
-    // ========================================================================
-
     FString CollectorName = CollectingActor ? CollectingActor->GetName() : TEXT("Unknown");
 
     UE_LOG(LogWizardJamGameMode, Log,
@@ -199,11 +201,6 @@ void AWizardJamGameMode::HandleComponentSpellCollected(
     AActor* OwningActor,
     UAC_SpellCollectionComponent* Component)
 {
-    // ========================================================================
-    // Handler for SpellCollectionComponent static delegate
-    // This catches spells added by ANY method (collectible, debug, script)
-    // ========================================================================
-
     // Only process if not already tracked (prevents double events)
     if (!CollectedSpells.Contains(SpellTypeName))
     {
@@ -211,17 +208,8 @@ void AWizardJamGameMode::HandleComponentSpellCollected(
     }
 }
 
-// ============================================================================
-// SHARED SPELL PROCESSING
-// ============================================================================
-
 void AWizardJamGameMode::ProcessNewSpell(FName SpellTypeName, AActor* CollectingActor)
 {
-    // ========================================================================
-    // Central spell processing logic
-    // Adds to tracking and broadcasts on BOTH static and instance delegates
-    // ========================================================================
-
     // Validate input
     if (SpellTypeName == NAME_None)
     {
@@ -253,82 +241,93 @@ void AWizardJamGameMode::ProcessNewSpell(FName SpellTypeName, AActor* Collecting
     UE_LOG(LogWizardJamGameMode, Display,
         TEXT("=========================================="));
 
-    // ========================================================================
-    // BROADCAST ON STATIC DELEGATE (C++ Listeners)
-    // HUD binds to this without needing a GameMode reference.
-    // This is the pure Observer pattern in action.
-    // ========================================================================
-
+    // Broadcast on static delegate (C++ listeners like HUD)
     OnSpellCollectedGlobal.Broadcast(SpellTypeName, TotalCount);
 
-    UE_LOG(LogWizardJamGameMode, Verbose,
-        TEXT("[GameMode] Broadcast on OnSpellCollectedGlobal"));
-
-    // ========================================================================
-    // BROADCAST ON INSTANCE DELEGATE (Blueprint Listeners)
-    // Blueprint widgets that have a GameMode reference bind to this.
-    // ========================================================================
-
+    // Broadcast on instance delegate (Blueprint listeners)
     OnSpellTypeCollected.Broadcast(SpellTypeName, TotalCount);
-
-    UE_LOG(LogWizardJamGameMode, Verbose,
-        TEXT("[GameMode] Broadcast on OnSpellTypeCollected (instance)"));
 }
 
-void AWizardJamGameMode::OnGoalScored(AActor* ScoringActor, FName Element, int32 PointsAwarded, bool bWasCorrectElement)
+// ============================================================================
+// QUIDDITCH SCORING HANDLERS
+// ============================================================================
+
+void AWizardJamGameMode::OnGoalScored(
+    AActor* ScoringActor,
+    FName Element,
+    int32 PointsAwarded,
+    bool bWasCorrectElement)
 {
     if (!ScoringActor || PointsAwarded == 0)
     {
         return;
     }
 
-    // Determine which team scored
+    // Determine which team scored based on actor's team ID
     int32 ScorerTeamID = GetActorTeamID(ScoringActor);
 
     if (ScorerTeamID == 0)
     {
-        // Player scored
+        // Player team scored
         PlayerScore += PointsAwarded;
         OnPlayerScored.Broadcast(PlayerScore, PointsAwarded);
 
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("========================================"));
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("=== PLAYER SCORED ==="));
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("Points: +%d | Total: %d | Element: %s"),
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("========================================"));
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("=== PLAYER SCORED ==="));
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("Points: +%d | Total: %d | Element: %s"),
             PointsAwarded, PlayerScore, *Element.ToString());
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("========================================"));
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("========================================"));
     }
     else if (ScorerTeamID == 1)
     {
-        // AI scored
+        // AI team scored
         AIScore += PointsAwarded;
         OnAIScored.Broadcast(AIScore, PointsAwarded);
 
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("========================================"));
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("=== AI SCORED ==="));
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("Points: +%d | Total: %d | Element: %s"),
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("========================================"));
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("=== AI SCORED ==="));
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("Points: +%d | Total: %d | Element: %s"),
             PointsAwarded, AIScore, *Element.ToString());
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("========================================"));
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("========================================"));
+    }
+    else
+    {
+        UE_LOG(LogWizardJamGameMode, Warning,
+            TEXT("[GameMode] Unknown team ID %d for actor %s"),
+            ScorerTeamID, *ScoringActor->GetName());
     }
 
-    // Check if match has ended
+    // Check if match should end
     CheckMatchEnd();
 }
 
 void AWizardJamGameMode::CheckMatchEnd()
-{// Check if either team reached winning score
+{
+    // Check if player reached winning score
     if (PlayerScore >= WinningScore)
     {
         OnMatchEnded.Broadcast(true);
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("=== PLAYER WINS! === Final Score: Player %d - AI %d"),
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("=== PLAYER WINS! === Final Score: Player %d - AI %d"),
             PlayerScore, AIScore);
 
         // Stop match timer
         GetWorldTimerManager().ClearTimer(MatchTimerHandle);
     }
+    // Check if AI reached winning score
     else if (AIScore >= WinningScore)
     {
         OnMatchEnded.Broadcast(false);
-        UE_LOG(LogWizardJamGameMode, Display, TEXT("=== AI WINS! === Final Score: Player %d - AI %d"),
+        UE_LOG(LogWizardJamGameMode, Display,
+            TEXT("=== AI WINS! === Final Score: Player %d - AI %d"),
             PlayerScore, AIScore);
 
         // Stop match timer
@@ -350,17 +349,21 @@ int32 AWizardJamGameMode::GetActorTeamID(AActor* Actor) const
         return TeamAgent->GetGenericTeamId().GetId();
     }
 
-    // Default to player team
+    // Default to player team (0) if no team interface
     return 0;
 }
 
 void AWizardJamGameMode::OnMatchTimeExpired()
-{    // Determine winner by score
+{
+    // Determine winner by score when time expires
     bool bPlayerWon = PlayerScore > AIScore;
 
     OnMatchEnded.Broadcast(bPlayerWon);
 
-    UE_LOG(LogWizardJamGameMode, Display, TEXT("=== TIME EXPIRED ==="));
-    UE_LOG(LogWizardJamGameMode, Display, TEXT("Final Score: Player %d - AI %d"), PlayerScore, AIScore);
-    UE_LOG(LogWizardJamGameMode, Display, TEXT("Winner: %s"), bPlayerWon ? TEXT("PLAYER") : TEXT("AI"));
+    UE_LOG(LogWizardJamGameMode, Display,
+        TEXT("=== TIME EXPIRED ==="));
+    UE_LOG(LogWizardJamGameMode, Display,
+        TEXT("Final Score: Player %d - AI %d"), PlayerScore, AIScore);
+    UE_LOG(LogWizardJamGameMode, Display,
+        TEXT("Winner: %s"), bPlayerWon ? TEXT("PLAYER") : TEXT("AI"));
 }
